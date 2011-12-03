@@ -235,7 +235,7 @@ static int r_srvhello(struct ectun *ec, const unsigned char *buf, size_t sz) {
 	if (!hmac_ok(ec->km, sizeof(msg.body), (byte *)&msg.body))
 		return ECTUN_ERR_HMACFAIL;
 	hash(sizeof(ec->my_e), ec->my_e, hv);
-	if (memcmp(hv, msg.body.hnce, sizeof(hv)))
+	if (!memeq(sizeof(hv), msg.body.hnce, hv))
 		return ECTUN_ERR_BADMSG;
 
 	symm_init(&ec->send, ec->ke, 0);
@@ -295,6 +295,7 @@ ssize_t ectun_recv(struct ectun *ec, const unsigned char *inbuf, size_t sz, unsi
 }
 
 size_t ectun_sendsize(struct ectun *ec, size_t sz) {
+	(void)ec;
 	return sz + sizeof(hmac_val);
 }
 

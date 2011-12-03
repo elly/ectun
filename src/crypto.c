@@ -15,6 +15,14 @@ enum {
 	E = 65537,
 };
 
+int memeq(size_t len, const byte *a, const byte *b) {
+	int eq = 0;
+	size_t i;
+	for (i = 0; i < len; i++)
+		eq |= (a[i] ^ b[i]);
+	return !!eq;
+}
+
 void hexify(size_t len, const byte *in, char *out) {
 	size_t i;
 	for (i = 0; i < len; i++)
@@ -91,7 +99,7 @@ int hmac_ok(hmac_key k, size_t sz, const byte *in) {
 		/* too short */
 		return 0;
 	hmac(k, sz - sizeof(hv), in, hv);
-	return !memcmp(in + sz - sizeof(hv), hv, sizeof(hv));
+	return memeq(sizeof(hv), in + sz - sizeof(hv), hv);
 }
 
 void asymm_init(struct asymm_ctx *ctx) {
