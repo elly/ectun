@@ -3,6 +3,11 @@
 
 #include "ectun.h"
 
+static int kp(const char *h, void *arg) {
+	printf("ok? %s\n", h);
+	return 1;
+}
+
 int main(void) {
 	ectun_ukey sukey;
 	ectun_pkey spkey;
@@ -23,7 +28,7 @@ int main(void) {
 	printf("ckey\n");
 
 	cec = ectun_new_client(sukey, cpkey);
-	sec = ectun_new_server(spkey, NULL, NULL);
+	sec = ectun_new_server(spkey, kp, NULL);
 	sz = ectun_hasoutput(cec);
 	printf("c->s %zub\n", sz);
 	ectun_output(cec, buf0, sizeof(buf0));

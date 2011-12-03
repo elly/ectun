@@ -1,9 +1,11 @@
 #include <assert.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+#include <polarssl/error.h>
 #include <polarssl/md.h>
 #include <polarssl/sha2.h>
 
@@ -12,6 +14,12 @@
 enum {
 	E = 65537,
 };
+
+void hexify(size_t len, const byte *in, char *out) {
+	size_t i;
+	for (i = 0; i < len; i++)
+		sprintf(out + 2 * i, "%02x", in[i]);
+}
 
 void randbytes(size_t len, byte *buf) {
 	static int devrandom = -1;

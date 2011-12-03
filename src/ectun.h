@@ -26,7 +26,7 @@ struct ectun;
 int ectun_genkey(ectun_ukey *ukey, ectun_pkey *pkey);
 
 struct ectun *ectun_new_client(ectun_ukey skey, ectun_pkey ckey);
-struct ectun *ectun_new_server(ectun_pkey skey, ectun_keypred *kc, void *arg);
+struct ectun *ectun_new_server(ectun_pkey skey, ectun_keypred kc, void *arg);
 
 int ectun_needsinput(struct ectun *ec);
 int ectun_input(struct ectun *ec, const unsigned char *buf, size_t sz);

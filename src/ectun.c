@@ -8,6 +8,7 @@
 
 #include <polarssl/aes.h>
 #include <polarssl/bignum.h>
+#include <polarssl/error.h>
 #include <polarssl/md.h>
 #include <polarssl/rsa.h>
 #include <polarssl/sha2.h>
@@ -50,8 +51,9 @@ struct ectun {
 
 	int state;
 
-	ectun_keypred *kc;
+	ectun_keypred kc;
 	void *kcarg;
+	hash_val hkcu;
 };
 
 struct m_client_hello {
@@ -115,6 +117,7 @@ static void s_clihello(struct ectun *ec, unsigned char *buf, size_t sz) {
 static void s_srvhello(struct ectun *ec, unsigned char *buf, size_t sz) {
 	struct m_server_hello msg;
 	char b[2048];
+	char hexhash[sizeof(hash_val) * 2 + 1];
 	int r;
 
 	msg.magic = M_SERVER_HELLO;
@@ -131,7 +134,12 @@ static void s_srvhello(struct ectun *ec, unsigned char *buf, size_t sz) {
 	}
 
 	memcpy(buf, &msg, sizeof(msg));
-	ec->state = S_SESSION;
+	hexify(sizeof(ec->hkcu), ec->hkcu, hexhash);
+
+	if (ec->kc && ec->kc(hexhash, ec->kcarg))
+		ec->state = S_NONE;
+	else
+		ec->state = S_SESSION;
 } 
 
 static struct ectun *ectun_new(void) {
@@ -156,7 +164,7 @@ struct ectun *ectun_new_client(char *sukey, char *cpkey) {
 	return e;
 }
 
-struct ectun *ectun_new_server(char *spkey, ectun_keypred *kc, void *arg) {
+struct ectun *ectun_new_server(char *spkey, ectun_keypred kc, void *arg) {
 	struct ectun *e = ectun_new();
 	if (!e)
 		return NULL;
@@ -189,6 +197,7 @@ static int r_clihello(struct ectun *ec, const unsigned char *buf, size_t sz) {
 
 	if (asymm_read_ukey(&ec->their_asymm, msg.body.kcu))
 		return ECTUN_ERR_BADMSG;
+	hash(sizeof(msg.body.kcu), msg.body.kcu, ec->hkcu);
 
 	symm_init(&ec->send, ec->ke, 1);
 	symm_init(&ec->recv, ec->ke, 0);

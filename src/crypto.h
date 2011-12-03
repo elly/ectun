@@ -18,6 +18,7 @@ typedef byte hmac_val[32];
 extern void mknonce(nonce n);
 extern void randbytes(size_t len, byte *buf);
 extern void xorbytes(size_t len, const byte *a, const byte *b, byte *c);
+extern void hexify(size_t len, const byte *in, char *out);
 
 struct symm_ctx {
 	aes_context ctx;
