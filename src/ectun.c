@@ -136,7 +136,7 @@ static void s_srvhello(struct ectun *ec, unsigned char *buf, size_t sz) {
 	memcpy(buf, &msg, sizeof(msg));
 	hexify(sizeof(ec->hkcu), ec->hkcu, hexhash);
 
-	if (ec->kc && ec->kc(hexhash, ec->kcarg))
+	if (ec->kc && !ec->kc(hexhash, ec->kcarg))
 		ec->state = S_NONE;
 	else
 		ec->state = S_SESSION;
@@ -282,12 +282,15 @@ void ectun_output(struct ectun *ec, unsigned char *buf, size_t sz) {
 
 ssize_t ectun_recv(struct ectun *ec, const unsigned char *inbuf, size_t sz, unsigned char *outbuf) {
 	/* Messages on the wire are HMAC(Km, Es(Ke, b)) */
+	assert(ec->state == S_SESSION);
+	ec->state = S_NONE;
 	if (sz < sizeof(hmac_val))
 		return ECTUN_ERR_BADMSG;
 	if (!hmac_ok(ec->km, sz, inbuf))
 		return ECTUN_ERR_HMACFAIL;
 	sz -= sizeof(hmac_val);
 	symm(&ec->recv, sz, inbuf, outbuf);
+	ec->state = S_SESSION;
 	return sz;
 }
 
@@ -296,6 +299,7 @@ size_t ectun_sendsize(struct ectun *ec, size_t sz) {
 }
 
 void ectun_send(struct ectun *ec, const unsigned char *inbuf, size_t sz, unsigned char *outbuf) {
+	assert(ec->state == S_SESSION);
 	symm(&ec->send, sz, inbuf, outbuf);
 	hmac(ec->km, sz, outbuf, outbuf + sz);
 }
