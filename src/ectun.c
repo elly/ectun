@@ -175,6 +175,7 @@ static int r_clihello(struct ectun *ec, const unsigned char *buf, size_t sz) {
 
 	if (sz != sizeof(msg))
 		return ECTUN_ERR_BADMSG;
+
 	memcpy(&msg, buf, sz);
 	if (asymm_decrypt(&ec->my_asymm, sizeof(msg.kt), msg.kt, kt) != sizeof(kt))
 		return ECTUN_ERR_BADMSG;
@@ -227,9 +228,11 @@ static int r_srvhello(struct ectun *ec, const unsigned char *buf, size_t sz) {
 	hash(sizeof(ec->my_e), ec->my_e, hv);
 	if (memcmp(hv, msg.body.hnce, sizeof(hv)))
 		return ECTUN_ERR_BADMSG;
+
 	symm_init(&ec->send, ec->ke, 0);
 	symm_init(&ec->recv, ec->ke, 1);
 	ec->state = S_SESSION;
+
 	printf("srvhello ok\n");
 	return 0;
 }
