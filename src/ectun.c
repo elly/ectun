@@ -131,6 +131,7 @@ static void s_srvhello(struct ectun *ec, unsigned char *buf, size_t sz) {
 	}
 
 	memcpy(buf, &msg, sizeof(msg));
+	ec->state = S_SESSION;
 } 
 
 static struct ectun *ectun_new(void) {
@@ -228,6 +229,7 @@ static int r_srvhello(struct ectun *ec, const unsigned char *buf, size_t sz) {
 		return ECTUN_ERR_BADMSG;
 	symm_init(&ec->send, ec->ke, 0);
 	symm_init(&ec->recv, ec->ke, 1);
+	ec->state = S_SESSION;
 	printf("srvhello ok\n");
 	return 0;
 }
