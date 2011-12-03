@@ -1,0 +1,118 @@
+.TH ECTUN "3" "October 2011" "ectun" "Libraries"
+.SH NAME
+ectun - encrypted tunnel
+.SH SYNOPSIS
+typedef const char *\fBectun_pkey\fR;
+.br
+typedef const char *\fBectun_ukey\fR;
+.br
+typedef const char *\fBectun_hash\fR;
+.br
+typedef int (*\fBectun_keypred\fR)(ectun_hash \fIhash\fR, void *\fIarg\fR);
+.PP
+enum {
+.br
+	ECTUN_ERR_NONE = 0,
+.br
+	ECTUN_ERR_NOMEM = -1,
+.br
+	ECTUN_ERR_BADMSG = -2,
+.br
+	ECTUN_ERR_ACCESS = -3,
+.br
+	ECTUN_ERR_HMACFAIL = -4,
+.br
+	ECTUN_ERR_DECRYPT = -5,
+.br
+};
+.br
+struct \fBectun\fR;
+.PP
+.br
+int \fBectun_genkey\fR(ectun_ukey *\fIukey\fR, ectun_pkey *\fIpkey\fR);
+.PP
+struct ectun *\fBectun_new_client\fR(ectun_ukey \fIskey\fR, ectun_pkey \fIckey\fR);
+.br
+struct ectun *\fBectun_new_server\fR(ectun_pkey \fIskey\fR, ectun_keypred *\fIkc\fR, void *\fIarg\fR);
+.PP
+int \fBectun_needsinput\fR(struct ectun *\fIec\fR);
+.br
+int \fBectun_input\fR(struct ectun *\fIec\fR, const char *\fIbuf\fR, size_t \fIsz\fR);
+.br
+size_t \fBectun_hasoutput\fR(struct ectun *\fIec\fR);
+.br
+void \fBectun_output\fR(struct ectun *\fIec\fR, char *\fIbuf\fR, size_t \fIsz\fR);
+.PP
+ssize_t \fBectun_recv\fR(struct ectun *\fIec\fR, const unsigned char *\fIinbuf\fR, size_t \fIsz\fR,
+                   unsigned char *\fIoutbuf\fR);
+.br
+size_t \fBectun_sendsize\fR(struct ectun *\fIec\fR, size_t \fIsz\fR);
+.br
+void \fBectun_send\fR(struct ectun *\fIec\fR, const unsigned char *\fIinbuf\fR, size_t \fIsz\fR,
+                unsigned char *\fIoutbuf\fR);
+.PP
+int \fBectun_issession\fR(struct ectun *\fIec\fR);
+.SH KEY GENERATION
+An ectun key is either a public key (an \fIectun_ukey\fR) or a private key (an
+\fIectun_pkey\fR); together these form part of a \fBkey pair\fR. Key pairs are
+generated with \fBectun_genkey\fR, which places pointers to buffers allocated
+with \fBmalloc\fR(3) into the supplied locations. These keys are null-terminated
+strings. They can be freed (with \fBfree\fR(3)) when no longer needed.
+.SH CONTEXTS
+The \fBectun\fR interface is centered around the \fBectun\fR structure, which
+represents a single ectun context. An ectun structure can be either a
+\fBclient\fR or \fBserver\fR context, which are constructed with
+\fBectun_new_client\fR and \fBectun_new_server\fR respectively. A client is
+constructed with the server's public key \fIskey\fR and the client's private key
+\fIckey\fR, which are strings produced by \fBectun_genkey\fR. A server is
+constructed with its own private key \fIskey\fR, a validator function for client
+keys \fIkc\fR, and an argument \fIarg\fR to pass to the validator. The validator
+is called when a client hello is received, with the sha256 hash (as a hex
+string) of the client's claimed public key passed in as an argument. At the
+point in the protocol when the public key is presented for validation, \fBno
+confirmation has been done that the client owns the corresponding private
+key\fR.
+.PP
+Once an ectun context has been constructed, it is fed input and produces output.
+An ectun context must be fed input one message at a time, and therefore requires
+an underlying protocol that preserves message boundaries; messages may also not
+be dropped or reordered, so ectun requires an underlying protocol that is
+reliable and order-preserving. An individual ectun message is never more than 
+.PP
+An ectun context has two modes of operation: \fBsetup\fR and \fBsession\fR. All
+contexts begin in \fBsetup\fR mode.
+During \fBsetup\fR, four functions are useful: \fBectun_needsinput\fR,
+\fBectun_input\fR, \fBectun_hasoutput\fR, and \fBectun_output\fR. Once neither
+\fBectun_needsinput\fR nor \fBectun_hasoutput\fR return a nonzero value, the
+context is in \fBsession\fR mode (which can also be tested for with the utility
+function \fBectun_issession\fR) and two other functions are useful:
+\fBectun_send\fR and \fBectun_recv\fR. 
+.PP
+The \fBectun_needsinput\fR function returns nonzero if input is needed to
+continue the protocol handshake, and zero if no input is currently needed. The
+\fBectun_hasoutput\fR function returns the size of the buffer needed for the
+next output is needed to continue the protocol handshake, or zero if no output
+is currently needed. The \fBectun_input\fR function supplies a message to ectun
+during the handshake phase, and returns an ECTUN_ERR_* value, or zero if no
+error occurs. The \fBectun_output\fR function supplies the next handshake
+message to be sent, returning nothing.
+.PP
+The \fBectun_recv\fR function is used to decrypt a received packet; it returns
+an ECTUN_ERR_* value, or the size of the received data. The supplied output
+buffer must be the same size (\fIsz\fR) as the supplied input buffer. The
+\fBectun_send\fR function is used to encrypt a packet to be sent; the output
+buffer must be of size \fBectun_sendsize\fR(..., \fIsz\fR).
+.SH ERROR CODES
+The error codes returned by ectun are as follows:
+.TP
+\fBNONE\fR: No error.
+.TP
+\fBNOMEM\fR: A memory allocation failed.
+.TP
+\fBBADMSG\fR: A protocol message was malformed.
+.TP
+\fBACCESS\fR: The client's supplied public key was rejected by the validator.
+.TP
+\fBHMACFAIL\fR: An HMAC failed to verify.
+.TP
+\fBDECRYPT\fR: A protocol message failed to decrypt.
