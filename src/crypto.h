@@ -4,6 +4,7 @@
 #define CRYPTO_H
 
 #include <polarssl/aes.h>
+#include <polarssl/dhm.h>
 #include <polarssl/rsa.h>
 
 typedef unsigned char byte;
@@ -50,5 +51,17 @@ extern void asymm_write_ukey(struct asymm_ctx *ctx, asymm_pubkey ukey);
 extern int asymm_read_ukey(struct asymm_ctx *ctx, const asymm_pubkey ukey);
 extern int asymm_encrypt(struct asymm_ctx *ctx, size_t len, const asymm_msg in, asymm_msg out);
 extern ssize_t asymm_decrypt(struct asymm_ctx *ctx, size_t len, const asymm_msg in, asymm_msg out);
+extern int asymm_sign(struct asymm_ctx *ctx, const hash_val hash, asymm_msg sig);
+extern int asymm_verify(struct asymm_ctx *ctx, const hash_val hash, asymm_msg sig);
+
+struct dh_ctx {
+	dhm_context dhm;
+	
+};
+
+extern int dh_init(struct dh_ctx *ctx);
+extern char* dh_ukey(struct dh_ctx *ctx);
+extern int dh_got(struct dh_ctx *ctx, const char *ukey);
+extern int dh_final(struct dh_ctx *ctx, symm_key ke, hmac_key km);
 
 #endif /* !CRYPTO_H */

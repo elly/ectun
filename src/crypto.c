@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <polarssl/dhm.h>
 #include <polarssl/error.h>
 #include <polarssl/md.h>
 #include <polarssl/sha2.h>
@@ -241,4 +242,71 @@ ssize_t asymm_decrypt(struct asymm_ctx *ctx, size_t len, const asymm_msg in, asy
 		return r;
 	memcpy(out, m, plainlen);
 	return plainlen;
+}
+
+int asymm_sign(struct asymm_ctx *ctx, const hash_val hash, asymm_msg sig) {
+	return rsa_pkcs1_sign(&ctx->rsa, _rng, NULL, RSA_PRIVATE,
+	                      SIG_RSA_SHA256, 0, hash, sig);
+}
+
+int asymm_verify(struct asymm_ctx *ctx, const hash_val hash, asymm_msg sig) {
+	return rsa_pkcs1_verify(&ctx->rsa, RSA_PUBLIC, SIG_RSA_SHA256,
+	                        0, hash, sig);
+}
+
+static const char *dh_modulus =
+"00feead19dbeaf90f61cfca1065d69db08839a2a2b6aef2488abd7531fbb"
+"3e462e7dcecefbcedcbbbdf56549ee951530568188c3d97294166b6aaba0"
+"aa5cc8555f9125503a180e90324c7f39c6a3452f3142ee72ab7dffc74c52"
+"8db6da76d9c644f55d083e9cde74f7e742413b69476617d2670f2bf6d59f"
+"fcd7c3bddeed41e2bd2ccdd9e612f1056cab88c441d7f9ba74651ed1a84d"
+"407a27d71895f777ab6c7763cc00e6f1c30b2fe79446927e74bc73b8431b"
+"53011af5ad1515e63dc1de83cc802ece7dfc71fbdf179f8e41d7f1b43eba"
+"75d5a9c3b11d4f1b0b5a0988a9aacbccc1051226dc8410e41693ec8591e3"
+"1ee2f5afdfaede122d1277fc270be4d25c1137a58be961eac9f27d4c71e2"
+"391904dd6ab27bece5bd6c64c79b146c2d208cd63a4b74f8dae638dbe2c8"
+"806ba107738a8df5cfe214a4b73d03c91275fba5728146ce5fec01775b74"
+"481adf86f4854d65f5da4bb67f882a60ce0bca0acd157aa377f10b091ad0"
+"b568893039eca33cdcb61ba8c9e32a87a2f5d8b7fd26734d2f096792352d"
+"70ade9f4a51d8488bc57d32a638e0b14d6693f6776fffb355fedf652201f"
+"a70cb8db34fb549490951a701e04ad49d671b74d089caa8c0e5e833a2129"
+"1d6978f918f25d5c769bdbe4bb72a84a1afe6a0bbad18d3eacc7b454af40"
+"8d4f1ccb23b9ae576fdae2d1a68f43d275741db19eedc3b81b5e56964f5f"
+"8c3363";
+static const size_t dh_modulus_sz = 512;
+
+int dh_init(struct dh_ctx *ctx) {
+	byte buf[dh_modulus_sz];
+	memset(&ctx->dhm, 0, sizeof(ctx->dhm));
+	mpi_read_string(&ctx->dhm.P, 16, dh_modulus);
+	mpi_lset(&ctx->dhm.G, 2);
+	ctx->dhm.len = mpi_size(&ctx->dhm.P);
+	return dhm_make_public(&ctx->dhm, (sizeof(symm_key) + sizeof(hmac_key)) * 8,
+	                       buf, sizeof(buf), _rng, NULL);
+}
+
+char *dh_ukey(struct dh_ctx *ctx) {
+	size_t sz = 0;
+	char *buf;
+	mpi_write_string(&ctx->dhm.GX, 16, NULL, &sz);
+	buf = malloc(sz);
+	if (!buf)
+		return NULL;
+	mpi_write_string(&ctx->dhm.GX, 16, buf, &sz);
+	return buf;
+}
+
+int dh_got(struct dh_ctx *ctx, const char *ukey) {
+	return mpi_read_string(&ctx->dhm.GY, 16, ukey);
+}
+
+int dh_final(struct dh_ctx *ctx, symm_key ke, hmac_key km) {
+	byte buf[dh_modulus_sz];
+	size_t sz = sizeof(buf);
+	int r = dhm_calc_secret(&ctx->dhm, buf, &sz);
+	if (sz < sizeof(buf))
+		return 1;
+	memcpy(ke, buf, sizeof(symm_key));
+	memcpy(km, buf + sizeof(symm_key), sizeof(hmac_key));
+	return r;
 }

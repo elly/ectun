@@ -1,52 +1,31 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "crypto.h"
 #include "ectun.h"
 
-static int kp(const char *h, void *arg) {
-	printf("ok? %s\n", h);
-	return 1;
-}
-
 int main(void) {
-	ectun_ukey sukey;
-	ectun_pkey spkey;
-	ectun_ukey cukey;
-	ectun_pkey cpkey;
-	struct ectun *cec;
-	struct ectun *sec;
-	ssize_t sz;
-	unsigned char buf0[4096];
-	unsigned char buf1[4096];
-	unsigned char msg0[] = "Hello, server!";
-	unsigned char msg1[] = "Hello, client!";
+	struct dh_ctx s;
+	struct dh_ctx c;
+	char *cu;
+	char *su;
+	symm_key kes;
+	hmac_key kms;
+	symm_key kec;
+	hmac_key kmc;
 
-	printf("gen\n");
-	ectun_genkey(&sukey, &spkey);
-	printf("skey\n");
-	ectun_genkey(&cukey, &cpkey);
-	printf("ckey\n");
+	printf("ci %d\n", dh_init(&c));
+	printf("si %d\n", dh_init(&s));
+	cu = dh_ukey(&c);
+	su = dh_ukey(&s);
+	printf("cg %d\n", dh_got(&c, su));
+	printf("sg %d\n", dh_got(&s, cu));
+	printf("cf %d\n", dh_final(&c, kec, kmc));
+	printf("sf %d\n", dh_final(&s, kes, kms));
 
-	cec = ectun_new_client(sukey, cpkey);
-	sec = ectun_new_server(spkey, kp, NULL);
-	sz = ectun_hasoutput(cec);
-	printf("c->s %zub\n", sz);
-	ectun_output(cec, buf0, sizeof(buf0));
-	ectun_input(sec, buf0, sz);
-	sz = ectun_hasoutput(sec);
-	printf("s->c %zub\n", sz);
-	ectun_output(sec, buf1, sizeof(buf1));
-	ectun_input(cec, buf1, sz);
-
-	sz = ectun_sendsize(cec, sizeof(msg0));
-	ectun_send(cec, msg0, sizeof(msg0), buf0);
-	sz = ectun_recv(sec, buf0, sz, buf1);
-	printf("c->s %s\n", buf1);
-
-	sz = ectun_sendsize(sec, sizeof(msg1));
-	ectun_send(sec, msg1, sizeof(msg1), buf0);
-	sz = ectun_recv(cec, buf0, sz, buf1);
-	printf("s->c %s\n", buf1);
-	
+	if (memcmp(kes, kec, sizeof(kes)))
+		printf("ke mismatch\n");
+	if (memcmp(kms, kmc, sizeof(kms)))
+		printf("km mismatch\n");
 	return 0;
 }
