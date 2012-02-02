@@ -23,14 +23,28 @@ enum {
 	F_SERVER = 0x00000002,
 
 	M_CLIENT_HELLO = 0x45431000,
+	M_CLIENT_SIG = 0x45431001,
 	M_SERVER_HELLO = 0x45432000,
 	M_SESSION = 0x45433000,
 
-	S_NONE = 0,
-	S_WAIT_CLIENT_HELLO = 1,
-	S_WAIT_SERVER_HELLO = 2,
-	S_GOT_CLIENT_HELLO = 3,
-	S_SESSION = 4,
+	/* State encoding:
+	 * bit 31 = client needs input
+	 * bit 30 = server needs input
+	 * bit 29 = client has output
+	 * bit 28 = server has output
+	 */
+	SF_CLIENT_IN = 0x80000000,
+	SF_SERVER_IN = 0x40000000,
+	SF_CLIENT_OUT = 0x20000000,
+	SF_SERVER_OUT = 0x10000000,
+
+	S_NONE = 0x20000000,
+	S_WAIT_CLIENT_HELLO = 0x40000000,
+	S_WAIT_SERVER_HELLO = 0x80000000,
+	S_WAIT_CLIENT_SIG = 0x40000001,
+	S_GOT_CLIENT_HELLO = 0x10000000,
+	S_GOT_SERVER_HELLO = 0x20000001,
+	S_SESSION = 0x00000001,
 };
 
 struct ectun {
@@ -39,15 +53,13 @@ struct ectun {
 
 	unsigned int flags;
 
-	nonce my_e;
-	nonce my_m;
-	nonce their_e;
-	nonce their_m;
 	symm_key ke;
-	symm_key km;
+	hmac_key km;
 
 	struct asymm_ctx my_asymm;
 	struct asymm_ctx their_asymm;
+
+	struct dh_ctx dh;
 
 	int state;
 
@@ -58,29 +70,26 @@ struct ectun {
 
 struct m_client_hello {
 	unsigned int magic;
-
-	/* Encrypted under Ksu */
-	asymm_msg kt;
-
-	/* Fields below here are encrypted under Kt */
 	struct {
-		nonce nce;
-		nonce ncm;
 		asymm_pubkey kcu;
-	} body;
+		dh_pubkey ga;
+	} m;
+	asymm_msg sig;
 };
 
 struct m_server_hello {
 	unsigned int magic;
-	union {
-		struct {
-			nonce nse;
-			nonce nsm;
-			hash_val hnce;
-			hmac_val hmacv;
-		} body;
-		asymm_msg e_body;
-	};
+	struct {
+		dh_pubkey ga;
+		dh_pubkey gb;
+	} m;
+	asymm_msg sig;
+};
+
+struct m_client_sig {
+	unsigned int magic;
+	dh_pubkey gb;
+	asymm_msg sig;
 };
 
 int ectun_genkey(ectun_ukey *ukey, ectun_pkey *pkey) {
@@ -94,44 +103,35 @@ int ectun_genkey(ectun_ukey *ukey, ectun_pkey *pkey) {
 
 static void s_clihello(struct ectun *ec, unsigned char *buf, size_t sz) {
 	struct m_client_hello msg;
-	symm_key kt;
-	struct symm_ctx ctx;
+	hash_val hv;
 
 	assert(sz >= sizeof(msg));
+	memset(&msg, 0, sizeof(msg));
 	msg.magic = M_CLIENT_HELLO;
 
-	/* Generate Kt, compute Ea(Ksu, Kt) */
-	symm_gen(kt);
-	symm_init(&ctx, kt, 0);
-	asymm_encrypt(&ec->their_asymm, sizeof(kt), kt, msg.kt);
-
-	memcpy(msg.body.nce, ec->my_e, sizeof(ec->my_e));
-	memcpy(msg.body.ncm, ec->my_m, sizeof(ec->my_m));
-	asymm_write_ukey(&ec->my_asymm, msg.body.kcu);
-	symm(&ctx, sizeof(msg.body), (byte *)&msg.body, (byte *)&msg.body);
+	asymm_write_ukey(&ec->my_asymm, msg.m.kcu);
+	dh_write_sukey(&ec->dh, msg.m.ga);
+	hash(sizeof(msg.m), (void *)&msg.m, hv);
+	asymm_sign(&ec->my_asymm, hv, msg.sig);
 
 	memcpy(buf, &msg, sizeof(msg));
+
 	ec->state = S_WAIT_SERVER_HELLO;
 }
 
 static void s_srvhello(struct ectun *ec, unsigned char *buf, size_t sz) {
 	struct m_server_hello msg;
-	char b[2048];
+	hash_val hv;
 	char hexhash[sizeof(hash_val) * 2 + 1];
-	int r;
 
+	memset(&msg, 0, sizeof(msg));
 	msg.magic = M_SERVER_HELLO;
 	assert(sz >= sizeof(msg));
 
-	memcpy(msg.body.nse, ec->my_e, sizeof(ec->my_e));
-	memcpy(msg.body.nsm, ec->my_m, sizeof(ec->my_m));
-	hash(sizeof(ec->their_e), ec->their_e, msg.body.hnce);
-	hmac(ec->km, sizeof(msg.body) - sizeof(msg.body.hmacv), (byte *)&msg.body, msg.body.hmacv);
-	r = asymm_encrypt(&ec->their_asymm, sizeof(msg.body), msg.e_body, msg.e_body);
-	if (r) {
-		error_strerror(r, b, sizeof(b));
-		printf("%d: %s\n", r, b);
-	}
+	dh_write_rukey(&ec->dh, msg.m.ga);
+	dh_write_sukey(&ec->dh, msg.m.gb);
+	hash(sizeof(msg.m), (void *)&msg.m, hv);
+	asymm_sign(&ec->my_asymm, hv, msg.sig);
 
 	memcpy(buf, &msg, sizeof(msg));
 	hexify(sizeof(ec->hkcu), ec->hkcu, hexhash);
@@ -139,16 +139,30 @@ static void s_srvhello(struct ectun *ec, unsigned char *buf, size_t sz) {
 	if (ec->kc && !ec->kc(hexhash, ec->kcarg))
 		ec->state = S_NONE;
 	else
-		ec->state = S_SESSION;
-} 
+		ec->state = S_WAIT_CLIENT_SIG;
+}
+
+static void s_clisig(struct ectun *ec, unsigned char *buf, size_t sz) {
+	struct m_client_sig msg;
+	hash_val hv;
+
+	assert(sz >= sizeof(msg));
+
+	msg.magic = M_CLIENT_SIG;
+	dh_write_rukey(&ec->dh, msg.gb);
+	hash(sizeof(msg.gb), msg.gb, hv);
+	asymm_sign(&ec->my_asymm, hv, msg.sig);
+
+	memcpy(buf, &msg, sizeof(msg));
+	ec->state = S_SESSION;
+}
 
 static struct ectun *ectun_new(void) {
 	struct ectun *e = malloc(sizeof *e);
 	if (!e)
 		return NULL;
 	e->flags = 0;
-	mknonce(e->my_e);
-	mknonce(e->my_m);
+	dh_init(&e->dh);
 	asymm_init(&e->my_asymm);
 	asymm_init(&e->their_asymm);
 	return e;
@@ -178,79 +192,75 @@ struct ectun *ectun_new_server(char *spkey, ectun_keypred kc, void *arg) {
 
 static int r_clihello(struct ectun *ec, const unsigned char *buf, size_t sz) {
 	struct m_client_hello msg;
-	symm_key kt;
-	struct symm_ctx ctx;
+	hash_val hv;
 
 	if (sz != sizeof(msg))
 		return ECTUN_ERR_BADMSG;
 
 	memcpy(&msg, buf, sz);
-	if (asymm_decrypt(&ec->my_asymm, sizeof(msg.kt), msg.kt, kt) != sizeof(kt))
+	hash(sizeof(msg.m), (void *)&msg.m, hv);
+	asymm_read_ukey(&ec->their_asymm, msg.m.kcu);
+	if (asymm_verify(&ec->their_asymm, hv, msg.sig))
 		return ECTUN_ERR_BADMSG;
-	symm_init(&ctx, kt, 0);
-	symm(&ctx, sizeof(msg.body), (byte *)&msg.body, (byte *)&msg.body);
-
-	memcpy(ec->their_e, &msg.body.nce, sizeof(msg.body.nce));
-	memcpy(ec->their_m, &msg.body.ncm, sizeof(msg.body.ncm));
-	xorbytes(sizeof(ec->ke), ec->their_e, ec->my_e, ec->ke);
-	xorbytes(sizeof(ec->km), ec->their_m, ec->my_m, ec->km);
-
-	if (asymm_read_ukey(&ec->their_asymm, msg.body.kcu))
-		return ECTUN_ERR_BADMSG;
-	hash(sizeof(msg.body.kcu), msg.body.kcu, ec->hkcu);
-
-	symm_init(&ec->send, ec->ke, 1);
-	symm_init(&ec->recv, ec->ke, 0);
+	dh_read_rukey(&ec->dh, msg.m.ga);
+	hash(sizeof(msg.m.kcu), msg.m.kcu, ec->hkcu);
 	ec->state = S_GOT_CLIENT_HELLO;
-
-	printf("clihello ok\n");
 	return 0;
 }
 
 static int r_srvhello(struct ectun *ec, const unsigned char *buf, size_t sz) {
 	struct m_server_hello msg;
 	hash_val hv;
-	int r;
-	char b[2048];
+	dh_pubkey my_ukey;
 
 	if (sz != sizeof(msg))
 		return ECTUN_ERR_BADMSG;
 
 	memcpy(&msg, buf, sz);
-	r = asymm_decrypt(&ec->my_asymm, sizeof(msg.e_body), msg.e_body, msg.e_body);
-	if (r < 0) {
-		error_strerror(r, b, sizeof(b));
-		printf("%d: %s\n", r, b);
-		return r;
-	}
-
-	if (r != sizeof(msg.body))
+	hash(sizeof(msg.m), (void *)&msg.m, hv);
+	if (asymm_verify(&ec->their_asymm, hv, msg.sig))
 		return ECTUN_ERR_BADMSG;
-
-	memcpy(ec->their_e, msg.body.nse, sizeof(ec->their_e));
-	memcpy(ec->their_m, msg.body.nsm, sizeof(ec->their_m));
-	xorbytes(sizeof(ec->ke), ec->their_e, ec->my_e, ec->ke);
-	xorbytes(sizeof(ec->km), ec->their_m, ec->my_m, ec->km);
-
-	if (!hmac_ok(ec->km, sizeof(msg.body), (byte *)&msg.body))
-		return ECTUN_ERR_HMACFAIL;
-	hash(sizeof(ec->my_e), ec->my_e, hv);
-	if (!memeq(sizeof(hv), msg.body.hnce, hv))
+	memset(my_ukey, 0, sizeof(my_ukey));
+	dh_write_sukey(&ec->dh, my_ukey);
+	if (memcmp(my_ukey, msg.m.ga, sizeof(my_ukey)))
 		return ECTUN_ERR_BADMSG;
-
+	dh_read_rukey(&ec->dh, msg.m.gb);
+	dh_final(&ec->dh, ec->ke, ec->km);
 	symm_init(&ec->send, ec->ke, 0);
 	symm_init(&ec->recv, ec->ke, 1);
-	ec->state = S_SESSION;
+	ec->state = S_GOT_SERVER_HELLO;
+	return 0;
+}
 
-	printf("srvhello ok\n");
+static int r_clisig(struct ectun *ec, const unsigned char *buf, size_t sz) {
+	struct m_client_sig msg;
+	hash_val hv;
+	dh_pubkey my_ukey;
+
+	if (sz != sizeof(msg))
+		return ECTUN_ERR_BADMSG;
+
+	memcpy(&msg, buf, sz);
+	hash(sizeof(msg.gb), (void *)&msg.gb, hv);
+	if (asymm_verify(&ec->their_asymm, hv, msg.sig))
+		return ECTUN_ERR_BADMSG;
+	memset(my_ukey, 0, sizeof(my_ukey));
+	dh_write_sukey(&ec->dh, my_ukey);
+	if (memcmp(my_ukey, msg.gb, sizeof(my_ukey)))
+		return ECTUN_ERR_BADMSG;
+
+	dh_final(&ec->dh, ec->ke, ec->km);
+	symm_init(&ec->send, ec->ke, 1);
+	symm_init(&ec->recv, ec->ke, 0);
+	ec->state = S_SESSION;
 	return 0;
 }
 
 int ectun_needsinput(struct ectun *ec) {
 	if (ec->flags & F_SERVER)
-		return ec->state == S_WAIT_CLIENT_HELLO;
+		return ec->state & SF_SERVER_IN;
 	else
-		return ec->state == S_WAIT_SERVER_HELLO;
+		return ec->state & SF_CLIENT_IN;
 }
 
 int ectun_input(struct ectun *ec, const unsigned char *buf, size_t sz) {
@@ -259,18 +269,24 @@ int ectun_input(struct ectun *ec, const unsigned char *buf, size_t sz) {
 	type = *(unsigned int *)buf;
 	if (ec->flags & F_SERVER && type == M_CLIENT_HELLO)
 		return r_clihello(ec, buf, sz);
+	else if (ec->flags & F_SERVER && type == M_CLIENT_SIG)
+		return r_clisig(ec, buf, sz);
 	else if (!(ec->flags & F_SERVER) && type == M_SERVER_HELLO)
 		return r_srvhello(ec, buf, sz);
 	return ECTUN_ERR_BADMSG;
 }
 
 size_t ectun_hasoutput(struct ectun *ec) {
-	if (ec->flags & F_SERVER)
-		/* Need to reply to client hello */
-		return ec->state == S_GOT_CLIENT_HELLO ? sizeof(struct m_server_hello) : 0;
-	else
-		/* Need to send client hello */
-		return ec->state == S_NONE ? sizeof(struct m_client_hello) : 0;
+	if ((ec->flags & F_SERVER) && (ec->state & SF_SERVER_OUT)) {
+		if (ec->state == S_GOT_CLIENT_HELLO)
+			return sizeof(struct m_server_hello);
+	} else if (!(ec->flags & F_SERVER) && (ec->state & SF_CLIENT_OUT)) {
+		if (ec->state == S_NONE)
+			return sizeof(struct m_client_hello);
+		else if (ec->state == S_GOT_SERVER_HELLO)
+			return sizeof(struct m_client_sig);
+	}
+	return 0;
 }
 
 void ectun_output(struct ectun *ec, unsigned char *buf, size_t sz) {
@@ -278,12 +294,16 @@ void ectun_output(struct ectun *ec, unsigned char *buf, size_t sz) {
 		s_srvhello(ec, buf, sz);
 	else if (!(ec->flags & F_SERVER) && ec->state == S_NONE)
 		s_clihello(ec, buf, sz);
+	else if (!(ec->flags & F_SERVER) && ec->state == S_GOT_SERVER_HELLO)
+		s_clisig(ec, buf, sz);
 }
 
 ssize_t ectun_recv(struct ectun *ec, const unsigned char *inbuf, size_t sz, unsigned char *outbuf) {
+	hmac_val hv;
 	/* Messages on the wire are HMAC(Km, Es(Ke, b)) */
 	assert(ec->state == S_SESSION);
 	ec->state = S_NONE;
+	hmac(ec->km, sz - sizeof(hmac_val), inbuf, hv);
 	if (sz < sizeof(hmac_val))
 		return ECTUN_ERR_BADMSG;
 	if (!hmac_ok(ec->km, sz, inbuf))

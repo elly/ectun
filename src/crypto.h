@@ -15,6 +15,7 @@ typedef byte symm_key[32];
 typedef byte hmac_key[32];
 typedef byte hash_val[32];
 typedef byte hmac_val[32];
+typedef byte dh_pubkey[512];
 
 extern void mknonce(nonce n);
 extern void randbytes(size_t len, byte *buf);
@@ -60,8 +61,10 @@ struct dh_ctx {
 };
 
 extern int dh_init(struct dh_ctx *ctx);
-extern char* dh_ukey(struct dh_ctx *ctx);
-extern int dh_got(struct dh_ctx *ctx, const char *ukey);
+extern int dh_write_rukey(struct dh_ctx *ctx, dh_pubkey ukey);
+extern int dh_read_rukey(struct dh_ctx *ctx, const dh_pubkey ukey);
+extern int dh_write_sukey(struct dh_ctx *ctx, dh_pubkey ukey);
+extern int dh_read_sukey(struct dh_ctx *ctx, const dh_pubkey ukey);
 extern int dh_final(struct dh_ctx *ctx, symm_key ke, hmac_key km);
 
 #endif /* !CRYPTO_H */

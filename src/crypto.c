@@ -21,7 +21,7 @@ int memeq(size_t len, const byte *a, const byte *b) {
 	size_t i;
 	for (i = 0; i < len; i++)
 		eq |= (a[i] ^ b[i]);
-	return !!eq;
+	return !eq;
 }
 
 void hexify(size_t len, const byte *in, char *out) {
@@ -98,7 +98,7 @@ int hmac_ok(hmac_key k, size_t sz, const byte *in) {
 	hmac_val hv;
 	if (sz < sizeof(hv))
 		/* too short */
-		return 0;
+		return -2;
 	hmac(k, sz - sizeof(hv), in, hv);
 	return memeq(sizeof(hv), in + sz - sizeof(hv), hv);
 }
@@ -164,7 +164,7 @@ char *asymm_pkey(struct asymm_ctx *ctx) {
 	mpi_write_string(&ctx->rsa.QP, 16, qpbuf, &qplen);
 
 	/* The null terminators on d and p are replaced with : */
-	buf = malloc(strlen(tag) + 5 + strlen(nbuf) + strlen(dbuf)
+	buf = malloc(strlen(tag) + 8 + strlen(nbuf) + strlen(dbuf)
 	             + strlen(pbuf) + strlen(qbuf) + strlen(dpbuf)
 	             + strlen(dqbuf) + strlen(qpbuf));
 	sprintf(buf, "%s:%s:%s:%s:%s:%s:%s:%s", tag, nbuf, dbuf, pbuf, qbuf,
@@ -285,19 +285,22 @@ int dh_init(struct dh_ctx *ctx) {
 	                       buf, sizeof(buf), _rng, NULL);
 }
 
-char *dh_ukey(struct dh_ctx *ctx) {
-	size_t sz = 0;
-	char *buf;
-	mpi_write_string(&ctx->dhm.GX, 16, NULL, &sz);
-	buf = malloc(sz);
-	if (!buf)
-		return NULL;
-	mpi_write_string(&ctx->dhm.GX, 16, buf, &sz);
-	return buf;
+int dh_write_rukey(struct dh_ctx *ctx, dh_pubkey ukey) {
+	assert(sizeof(dh_pubkey) >= mpi_size(&ctx->dhm.GY));
+	return mpi_write_binary(&ctx->dhm.GY, ukey, sizeof(dh_pubkey));
 }
 
-int dh_got(struct dh_ctx *ctx, const char *ukey) {
-	return mpi_read_string(&ctx->dhm.GY, 16, ukey);
+int dh_write_sukey(struct dh_ctx *ctx, dh_pubkey ukey) {
+	assert(sizeof(dh_pubkey) >= mpi_size(&ctx->dhm.GX));
+	return mpi_write_binary(&ctx->dhm.GX, ukey, sizeof(dh_pubkey));
+}
+
+int dh_read_rukey(struct dh_ctx *ctx, const dh_pubkey ukey) {
+	return mpi_read_binary(&ctx->dhm.GY, ukey, sizeof(dh_pubkey));
+}
+
+int dh_read_sukey(struct dh_ctx *ctx, const dh_pubkey ukey) {
+	return mpi_read_binary(&ctx->dhm.GX, ukey, sizeof(dh_pubkey));
 }
 
 int dh_final(struct dh_ctx *ctx, symm_key ke, hmac_key km) {
