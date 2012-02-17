@@ -313,8 +313,8 @@ int dh_final(struct dh_ctx *ctx, symm_key ke, hmac_key km) {
 	assert(sizeof(hash_val) >= sizeof(hmac_key));
 	if (sz < sizeof(buf))
 		return 1;
-	hash(sizeof(symm_key), buf, hke);
-	hash(sizeof(hmac_key), buf + sizeof(symm_key), hkm);
+	hash(sz / 2, buf, hke);
+	hash(sz / 2, buf + (sz / 2), hkm);
 	memcpy(ke, hke, sizeof(symm_key));
 	memcpy(km, hkm, sizeof(hmac_key));
 	return r;
