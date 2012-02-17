@@ -12,25 +12,23 @@ ECTUN relies on the following cryptographic primitives:
 
 Ss: symmetric key size.
 Sa: asymmetric key size.
-Sh: Hash size.
 Sm: HMAC size.
-R(n): n random bits.
-H(b): the cryptographic hash of a byte string b.
+Sd: Diffie-Hellman key size.
 HMAC(k, b): the HMAC of a byte string b with a key k, appended to b.
-Es0(k, b): the byte string b, symmetrically encrypted with a key k.
-Ds0(k, b): the byte string b, symmetrically decrypted with a key k.
-Ea(k, b): the byte string b, asymetrically encrypted to public key k.
-Da(k, b): the byte string b, asymetrically decrypted with private key k.
+E(k, b): the byte string b, symmetrically encrypted with a key k.
+D(k, b): the byte string b, symmetrically decrypted with a key k.
+S(k, b): the byte string b, asymmetrically signed with key k.
+V(k, b): the byte string b, asymmetrically verified to be signed with key k.
 
 In revision 0 of this specification:
 Ss = 256
 Sa = 2048
-Sh = 256
 Sm = 256
+Sd = 4096
 H = SHA256
 HMAC = HMAC-SHA256
-Es, Ds = AES-256-CTR
-Ea, Da = RSAES-OAEP+SHA256, e = 65537, |n| >= 2048
+E, D = AES-256-CTR
+S, V = RSA-PSS-SHA256, e = 65537, |n| >= 2048
 
 Furthermore, let:
 x || y: "append y to x"
@@ -52,74 +50,42 @@ messages). Since a session key is randomly generated each time and a 128-bit cou
 is extremely unlikely to wrap during a session, reuse of a (session key,
 counter) pair should be expected never to happen.
 
-1. Client hello: The client generates two nonces Nce and Ncm, and a symmetric
-key Kt.  It then produces a package composed of the two nonces and its public
-key concatenated together, encrypts the package with K, encrypts K to the
-server's public key, and sends the results:
-	C: Nce = R(Ss)
-	C: Ncm = R(Ss)
-	C: Kt = R(Ss)
-	C -> S: Ea(Ksu, Kt) || Es(Kt, Nce || Ncm || Kcu)
-The server receives this message and decrypts it, learning Nce, Ncm, and Kcu. It
-optionally verifies that Kcu is on its whitelist of allowed public keys.
-	S: Da(Ksu, Kt) -> Kt
-	S: Ds(Kt, Es(Kt, Nce || Ncm || Kcu)) -> Nce, Ncm, Kcu
-The server and client now share Nce and Ncm.
-2. Server hello: The server generates two nonces Nse and Nsm, then combines them
-with Nce and Ncm to generate Ke and Km. The server responds with Nse and Nsm,
-encrypted to Kcu and HMACed with Km:
-	S: Nse = R(Ss)
-	S: Nsm = R(Ss)
-	S: Ke = Nce ^ Nse
-	S: Km = Ncm ^ Nsm
-	S -> C: Ea(Kcu, HMAC(Km, Nse || Nsm || H(Nce)))
-The client receives this message:
-	C: Da(Kcp, Ea(Kcu, HMAC(Km, Nse || Nsm))) -> HMAC(Km, Nse || Nsm)
-	C: Ke = Nce ^ Nse
-	C: Km = Ncm ^ Nsm
-	C: Verify HMAC(Km, Nse || Nsm) matches message.
-3. Session: To send a message b, send:
+1. Client hello: The client chooses some a (as used in diffie-hellman key
+exchange), prepends its public key, and signs the result with its private key:
+	C: a -> g^a
+	C -> S: S(Kcp, Kcu || g^a)
+
+The server receives the signed message, extracts Kcu, checks the signature on
+the received message, and optionally verifies that Kcu is on its whitelist of
+allowed public keys.
+
+The server and the client now share g^a, and the client knows a.
+
+2. Server hello: The server chooses some b (as used in diffie-hellman key
+exchange), prepends g^a from step 1, and signs the result with its public key:
+	S: b -> g^b
+	S -> C: S(Ksp, g^a || g^b)
+
+The client receives the signed message, checks the signature (as it already
+knows Ksu), then extracts g^b.
+
+The server and the client now share g^a and g^b, with the client knowing a and
+the server knowing b.
+
+3. Client signature: The client replies with g^b signed with its private key:
+	C -> S: S(Kcp, g^b)
+
+After step 3, the server has proof that the client possesses Kcp because the
+client was able to sign g^b (produced by the server), and the client has proof
+that the server possesses Ksp because the server was able to sign g^a (produced
+by the client).
+
+Both parties now share a secret g^a^b; this secret is treated as a bitstring.
+The first 256 bits of g^a^b are hashed to produce a shared secret key Ke, and
+the next 256 bits of g^a^b are hashed to produce a shared hmac key Km.
+
+4. Session: To send a message b, send:
 	HMAC(Km, Es(Ke, b))
-
-Security:
-Assuming the attacker does not have Ksp or Kcp, ECTUN is secure against a
-passive attacker as follows: since the attacker does not have Ksp or Kcp, they
-cannot decrypt either the client hello or the server hello, and will therefore
-have neither Nse nor Nce, and will therefore be unable to decrypt session
-messages. Neither Ksp nor Kcp are ever sent over the wire.
-
-ECTUN is secure against an active attacker as follows:
-At step 1, the attacker can replace Nce, Ncm, and Kcu with Nae, Nam, and Kau
-respectively.
-
-The attacker cannot learn Nce or Ncm, since they do not possess Ksp. Suppose
-they replace Nce and Ncm with Nae and Nam, leaving Kcu unchanged, causing the
-server to compute Ke' = Nae ^ Nse and Km' = Nam ^ Nsm; then the server's
-response is:
-	Ea(Kau, HMAC(Km', Nse || Nsm))
-The attacker can decrypt this message and learn Km'; however, Km' != Km, so they
-(not knowing Ncm to produce Km) are unable to produce the HMAC(Km, Nse || Nsm)
-that would cause C to accept this packet. C will refuse to proceed with the
-protocol; the attacker can talk to S, but since they have substituted Kau in for
-Kcu in the client hello message, they are talking under their own identity, not
-C's.
-
-At step 1, the attacker can replace just Nce and Ncm with Nae and Nam
-respetively, leaving Kcu intact; then the server compues Km' as above and
-replies with Ea(Kcu, HMAC(Km', Nse || Nsm || H(Nae)), and again C refuses to
-continue as Km != Km' and H(Nae) != H(Nce).
-
-There is also a slightly more insidious attack: since the client hello message
-is not authenticated in any way, and the symmetric cipher used is malleable, the
-attacker can flip arbitrary bits in any of Nce, Ncm, or Kcu to replace them with
-Nxe, Nxm, or Kxu, but they do not know the values of any of these. Replacing Ncm
-with Nxm will cause the HMAC in the server hello to fail because Km != Nxm ^
-Nsm; replacing Nce with Nxe will cause H(Nxe) to mismatch the expected H(Nce) in
-the server hello message. Replacing Kcu with Kxu will produce a server hello
-that no party can decrypt.
-
-The security of the protocol against active attackers hinges on the fact that
-under no circumstances can the attacker obtain Nce or Ncm.
 
 Wire protocol:
 ECTUN messages always begin with a message type (a four-byte field), followed by
@@ -127,23 +93,23 @@ a payload. Packet types are listed below. All integers are represented on the
 wire in network byte order.
 
 Client Hello: Packet type 0x45431000.
-	4 bytes of RSA message length
-	Encrypted to Ksu:
-		Ss bits of Kt
-	Encrypted with Kt:
-		Ss bits of Nce
-		Ss bits of Ncm
-		>=Sa bits of Kcu
+	Signed with Kcp:
+		Sa bits of Kcu
+		Sd bits of g^a
+	Ss bits of signature
 
 Server Hello: Packet type 0x45432000.
-	Encrypted to Kcu:
-		Ss bits of Nse
-		Ss bits of Nsm
-		Sh bits of H(Nce)
-		Sm bits of HMAC
+	Signed with Ksp:
+		Sd bits of g^a
+		Sd bits of g^b
+	Ss bits of signature
+
+Client Sig: Packet type 0x45431001.
+	Signed with Kcp:
+		Sd bits of g^b
+	Ss bits of signature
 
 Session: Packet type 0x45433000.
-	Counter value for this packet
 	Encrypted with Ke:
 		b bits of message
 	Sm bits of HMAC
