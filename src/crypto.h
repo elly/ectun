@@ -13,6 +13,7 @@ typedef byte asymm_msg[256];
 typedef byte nonce[32];
 typedef byte symm_key[32];
 typedef byte hmac_key[32];
+/* Must be >= size of symm_key and hmac_key for dh functions */
 typedef byte hash_val[32];
 typedef byte hmac_val[32];
 typedef byte dh_pubkey[512];

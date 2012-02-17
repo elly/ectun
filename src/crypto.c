@@ -306,10 +306,16 @@ int dh_read_sukey(struct dh_ctx *ctx, const dh_pubkey ukey) {
 int dh_final(struct dh_ctx *ctx, symm_key ke, hmac_key km) {
 	byte buf[dh_modulus_sz];
 	size_t sz = sizeof(buf);
+	hash_val hke;
+	hash_val hkm;
 	int r = dhm_calc_secret(&ctx->dhm, buf, &sz);
+	assert(sizeof(hash_val) >= sizeof(symm_key));
+	assert(sizeof(hash_val) >= sizeof(hmac_key));
 	if (sz < sizeof(buf))
 		return 1;
-	memcpy(ke, buf, sizeof(symm_key));
-	memcpy(km, buf + sizeof(symm_key), sizeof(hmac_key));
+	hash(sizeof(symm_key), buf, hke);
+	hash(sizeof(hmac_key), buf + sizeof(symm_key), hkm);
+	memcpy(ke, hke, sizeof(symm_key));
+	memcpy(km, hkm, sizeof(hmac_key));
 	return r;
 }

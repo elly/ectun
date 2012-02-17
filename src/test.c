@@ -62,6 +62,8 @@ int main(void) {
 	ectun_send(sec, msg1, sizeof(msg1), buf0);
 	sz = ectun_recv(cec, buf0, sz, buf1);
 	printf("s->c %p\n", buf1);
+
+	printf("ok\n");
 	
 	return 0;
 }
