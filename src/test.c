@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "crypto.h"
-#include "ectun.h"
+#include <ectun/crypto.h>
+#include <ectun/ectun.h>
 
 static int kp(char *h, void *arg) {
 	printf("ok? %s\n", h);

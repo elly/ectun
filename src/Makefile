@@ -1,4 +1,4 @@
-CFLAGS := -Wall -Wextra -g -fPIC
+CFLAGS := -Wall -Wextra -g -fPIC -I../include
 PREFIX ?= /usr/local
 
 libectun.so : crypto.o ectun.o

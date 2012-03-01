@@ -13,8 +13,8 @@
 #include <polarssl/rsa.h>
 #include <polarssl/sha2.h>
 
-#include "crypto.h"
-#include "ectun.h"
+#include <ectun/crypto.h>
+#include <ectun/ectun.h>
 
 enum {
 	BUF_MAX = 32768,

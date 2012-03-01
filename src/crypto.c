@@ -10,7 +10,7 @@
 #include <polarssl/md.h>
 #include <polarssl/sha2.h>
 
-#include "crypto.h"
+#include <ectun/crypto.h>
 
 enum {
 	E = 65537,
