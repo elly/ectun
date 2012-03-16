@@ -222,7 +222,7 @@ static int r_srvhello(struct ectun *ec, const unsigned char *buf, size_t sz) {
 		return ECTUN_ERR_BADMSG;
 	memset(my_ukey, 0, sizeof(my_ukey));
 	dh_write_sukey(&ec->dh, my_ukey);
-	if (memcmp(my_ukey, msg.m.ga, sizeof(my_ukey)))
+	if (!memeq(sizeof(my_ukey), my_ukey, msg.m.ga))
 		return ECTUN_ERR_BADMSG;
 	dh_read_rukey(&ec->dh, msg.m.gb);
 	dh_final(&ec->dh, ec->ke, ec->km);
@@ -246,7 +246,7 @@ static int r_clisig(struct ectun *ec, const unsigned char *buf, size_t sz) {
 		return ECTUN_ERR_BADMSG;
 	memset(my_ukey, 0, sizeof(my_ukey));
 	dh_write_sukey(&ec->dh, my_ukey);
-	if (memcmp(my_ukey, msg.gb, sizeof(my_ukey)))
+	if (!memeq(sizeof(my_ukey), my_ukey, msg.gb))
 		return ECTUN_ERR_BADMSG;
 
 	dh_final(&ec->dh, ec->ke, ec->km);
