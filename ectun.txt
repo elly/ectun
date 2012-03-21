@@ -33,6 +33,7 @@ S, V = RSA-PSS-SHA256, e = 65537, |n| >= 2048
 Furthermore, let:
 x || y: "append y to x"
 x ^ y: "x xor y"
+x ** y: "x raised to the power of y"
 
 The ECTUN protocol is based on a bidirectional flow of datagrams, each of which
 is encrypted and authenticated. For protocol description purposes, let:
@@ -52,37 +53,37 @@ counter) pair should be expected never to happen.
 
 1. Client hello: The client chooses some a (as used in diffie-hellman key
 exchange), prepends its public key, and signs the result with its private key:
-	C: a -> g^a
-	C -> S: S(Kcp, Kcu || g^a)
+	C: a -> g**a
+	C -> S: S(Kcp, Kcu || g**a)
 
 The server receives the signed message, extracts Kcu, checks the signature on
 the received message, and optionally verifies that Kcu is on its whitelist of
 allowed public keys.
 
-The server and the client now share g^a, and the client knows a.
+The server and the client now share g**a, and the client knows a.
 
 2. Server hello: The server chooses some b (as used in diffie-hellman key
-exchange), prepends g^a from step 1, and signs the result with its public key:
-	S: b -> g^b
-	S -> C: S(Ksp, g^a || g^b)
+exchange), prepends g**a from step 1, and signs the result with its public key:
+	S: b -> g**b
+	S -> C: S(Ksp, g**a || g**b)
 
 The client receives the signed message, checks the signature (as it already
-knows Ksu), then extracts g^b.
+knows Ksu), then extracts g**b.
 
-The server and the client now share g^a and g^b, with the client knowing a and
+The server and the client now share g**a and g**b, with the client knowing a and
 the server knowing b.
 
-3. Client signature: The client replies with g^b signed with its private key:
-	C -> S: S(Kcp, g^b)
+3. Client signature: The client replies with g**b signed with its private key:
+	C -> S: S(Kcp, g**b)
 
 After step 3, the server has proof that the client possesses Kcp because the
-client was able to sign g^b (produced by the server), and the client has proof
-that the server possesses Ksp because the server was able to sign g^a (produced
+client was able to sign g**b (produced by the server), and the client has proof
+that the server possesses Ksp because the server was able to sign g**a (produced
 by the client).
 
-Both parties now share a secret g^a^b; this secret is treated as a bitstring.
-The first 256 bits of g^a^b are hashed to produce a shared secret key Ke, and
-the next 256 bits of g^a^b are hashed to produce a shared hmac key Km.
+Both parties now share a secret g**(ab); this secret is treated as a bitstring.
+The first 256 bits of g**(ab) are hashed to produce a shared secret key Ke, and
+the next 256 bits of g**(ab) are hashed to produce a shared hmac key Km.
 
 4. Session: To send a message b, send:
 	HMAC(Km, Es(Ke, b))
@@ -95,18 +96,18 @@ wire in network byte order.
 Client Hello: Packet type 0x45431000.
 	Signed with Kcp:
 		Sa bits of Kcu
-		Sd bits of g^a
+		Sd bits of g**a
 	Ss bits of signature
 
 Server Hello: Packet type 0x45432000.
 	Signed with Ksp:
-		Sd bits of g^a
-		Sd bits of g^b
+		Sd bits of g**a
+		Sd bits of g**b
 	Ss bits of signature
 
 Client Sig: Packet type 0x45431001.
 	Signed with Kcp:
-		Sd bits of g^b
+		Sd bits of g**b
 	Ss bits of signature
 
 Session: Packet type 0x45433000.
